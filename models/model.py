@@ -6,7 +6,7 @@ from torch import Tensor, LongTensor
 from torch.amp import autocast
 from torch.utils.checkpoint import checkpoint
 
-from configs.model_args.small import ModelArgs
+from configs.model_args.args_7B import ModelArgs
 from models.block import CausalTransformerBlock
 from models.kv_cache import KVCache
 
@@ -156,3 +156,7 @@ class CausalTransformer(nn.Module):
             logits = self.lm_head(x) # [B, T, vocab_size]
 
             return logits
+
+from utils.misc import count_params
+params = count_params(CausalTransformer(ModelArgs()))
+print(f"{params:,}")

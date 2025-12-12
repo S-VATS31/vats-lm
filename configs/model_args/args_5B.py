@@ -1,4 +1,3 @@
-
 import math
 import torch
 from dataclasses import dataclass
@@ -6,24 +5,24 @@ from dataclasses import dataclass
 @dataclass
 class ModelArgs:
     """Extra small configuration of model arguments."""
-    d_model: int = 256
-    num_heads: int = 16
-    query_groups: int = 2
-    d_ffn: int = 1024
-    num_layers: int = 8
-    dropout_prob: float = 0.1
+    d_model: int = 3072
+    num_heads: int = 64
+    query_groups: int = 16
+    d_ffn: int = 12288
+    num_layers: int = 36
+    dropout_prob: float = 0.2
     rope_theta: float = 10000.0
     rms_norm_eps: float = 1e-7
     qk_norm_eps: float = 1e-8
-    left_window: int = 128
+    left_window: int = -1
     right_window: int = 0
-    vocab_size: int = 512
-    max_seq_len: int = 128
+    vocab_size: int = 32768
+    max_seq_len: int = 512
     gradient_checkpointing: bool = True
     use_qkv_bias: bool = False
     use_o_bias: bool = False
     use_mqa: bool = False
-    softmax_scale: float = math.sqrt(256//16)
+    softmax_scale: float = 1/ math.sqrt(3072//32)
     use_mlp_bias: bool = False
     device: torch.device = torch.device("cpu")
     dtype: torch.dtype = torch.float32
