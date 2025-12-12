@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,20 @@ from gpu_setup import gpu_dtypes
 from utils.attention_utils import extend_kv_heads, apply_qk_norm, check_contiguous
 
 class CausalAttention(nn.Module):
+    """Causal attention module.
+    
+    Args:
+        d_model (int): Dimensionality of model embeddings.
+        num_heads (int): Number of attention heads.
+        query_groups (int): Number of query groups for GQA.
+        rope_theta (float): Exponential base of RoPE.
+        use_qkv_bias (bool): Whether to use QKV bias or not.
+        use_o_bias (bool): Whether to use output bias or not.
+        softmax_scale (float): Scaler for attention computation.
+        use_windowed_attn (bool): Whether to use windowed attention.
+        device (torch.device): Accelerator at use.
+        dtype (torch.dtype): Data type of model parameters.
+    """
     def __init__(
         self,
         d_model: int,
@@ -68,6 +82,23 @@ class CausalAttention(nn.Module):
         layer_idx: Optional[int] = None,
         use_cache: bool = False
     ) -> Tuple[Tensor, Tensor, Tensor]:
+        """Set up QKV tensors.
+        
+        Args:
+            x (Tensor): Input tensor of shape [B, T_tokens, d_model].
+            use_qk_norm (bool): Whether use QK norm or not.
+            use_mqa (bool): Whether to use MQA or not.
+            use_qk_rms_norm (bool): Whether to use L2 or RMS QK norm.
+            cache (Optional[KVCache]): KV caching module.
+            layer_idx (Optional[int]): Layer of transformer stack.
+            use_cache (bool): Whether to use KV caching or not.
+
+        Returns:
+            Tuple:
+                - Tensor: Query tensor of shape [B, num_heads, T_tokens, head_dim].
+                - Tensor: Key tensor of shape [B, num_heads, T_tokens, head_dim].
+                - Tensor: Value tensor of shape [B, num_heads, T_tokens, head_dim].
+        """
         B, T_tokens, _ = x.shape
         
         if T_tokens == 0:
@@ -139,8 +170,25 @@ class CausalAttention(nn.Module):
         left_window: int = -1,
         right_window: int = -1,
         softcap: float = 0.0,
-        return_attn_probs: bool = False
     ) -> Tensor:
+        """Optimized attention utilizing flash attention 3.
+        
+        Args:
+            x (Tensor): Input tensor of shape [B, T_tokens, num_heads].
+            q (Tensor): Query tensor.
+            k (Tensor): Key tensor.
+            v (Tensor): Value tensor.
+            use_causal (bool): Whether to use causal masking or not.
+            padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_tokens].
+            left_window (int): Left window for windowed attention.
+                -1 means no bounds.
+            right_window (int): Right window for windowed attention.
+            softcap (float): Softcap value for attention.
+                0.0 means no softcap.
+
+        Returns:
+            Tensor: Output tensor of shape [B, T_tokens, d_model].
+        """
         if (
             x.device.type == "cuda" and
             q.device.type == "cuda" and
@@ -166,6 +214,19 @@ class CausalAttention(nn.Module):
         use_causal: bool = True,
         padding_mask: Optional[Tensor] = None
     ) -> Tensor:
+        """Scaled dot product attention.
+        
+        Args:
+            x (Tensor): Input tensor of shape [B, T_tokens, d_model].
+            q (Tensor): Query tensor.
+            k (Tensor): Key tensor.
+            v (Tensor): Value tensor.
+            use_causal (bool): Whether to use causal masking or not.
+            padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_tokens].
+
+        Returns:
+            Tensor: Output tensor of shape [B, T_tokens, d_model].
+        """
         B, _, T_q, _= q.shape
         T_k = k.size(2)
 
@@ -226,9 +287,33 @@ class CausalAttention(nn.Module):
         right_window: int = -1,
         softcap: float = 0.0,
         padding_mask: Optional[Tensor] = None,
-        return_attn_probs: bool = False,
         return_qkv: bool = False
-    ) -> Tensor:
+    ) -> Union[Tensor, Tuple[Tensor, Tensor, Tensor, Tensor]]:
+        """Run forward pass.
+        
+        Args:
+            x (Tensor): Input tensor.
+            us_qk_norm (bool): Whether to use QK norm or not.
+            use_mqa (bool): Whether to use MQA or not.
+            qk_norm_eps (float): Epsilon value for QK norm.
+            use_qk_rms_norm (bool): Whether to use L2 or RMS QK norm.
+            layer_idx (Optional[int]): Current layer of transformer stack.
+            use_cache (bool): Whether to use KV caching or not.
+            use_causal (bool): Whether to use causal masking or not.
+            left_window (int): Left window for windowed attention.
+                -1 means no bounds.
+            right_window (int): Right window for windowed attention.
+                -1 means no bounds.
+            softcap (float): Softcap value for attention.
+                0.0 means no softcap.
+            padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_tokens].
+            return_qkv (bool): Whether to return QKV tensors or not.
+
+        Returns:
+            Union:
+                - Tensor: Output tensor.
+                - Tuple: Output tensor and QKV tensors.
+        """
         with autocast(device_type=x.device.type):
             q, k, v = self._setup_qkv(
                 x,
@@ -247,7 +332,6 @@ class CausalAttention(nn.Module):
                 left_window=left_window,
                 right_window=right_window,
                 softcap=softcap,
-                return_attn_probs=return_attn_probs
             )
             if return_qkv:
                 return out, q, k, v
@@ -255,6 +339,22 @@ class CausalAttention(nn.Module):
 
 
 class CausalAttentionBlock(nn.Module):
+    """Causal attention block.
+    
+    Args:
+        d_model (int): Dimensionality of model embeddings.
+        num_heads (int): Number of attention heads.
+        query_groups (int): Number of query groups for GQA.
+        rope_theta (float): Exponential base of RoPE.
+        use_qkv_bias (bool): Whether to use QKV bias or not.
+        use_o_bias (bool): Whether to use output bias or not.
+        softmax_scale (float): Scaler for attention computation.
+        use_windowed_attn (bool): Whether to use windowed attention.
+        rms_norm_eps (float): Epsilon value for RMSNorm.
+        dropout_prob (float): Dropout probability.
+        device (torch.device): Accelerator at use.
+        dtype (torch.dtype): Data type of model parameters.
+    """
     def __init__(
         self,
         d_model: int,
@@ -307,8 +407,29 @@ class CausalAttentionBlock(nn.Module):
         right_window: int = -1,
         softcap: float = 0.0,
         padding_mask: Optional[Tensor] = None,
-
     ) -> Tensor:
+        """Run forward pass.
+        
+        Args:
+            x (Tensor): Input tensor.
+            us_qk_norm (bool): Whether to use QK norm or not.
+            use_mqa (bool): Whether to use MQA or not.
+            qk_norm_eps (float): Epsilon value for QK norm.
+            use_qk_rms_norm (bool): Whether to use L2 or RMS QK norm.
+            layer_idx (Optional[int]): Current layer of transformer stack.
+            use_cache (bool): Whether to use KV caching or not.
+            use_causal (bool): Whether to use causal masking or not.
+            left_window (int): Left window for windowed attention.
+                -1 means no bounds.
+            right_window (int): Right window for windowed attention.
+                -1 means no bounds.
+            softcap (float): Softcap value for attention.
+                0.0 means no softcap.
+            padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_tokens].
+
+        Returns:
+            Tensor: Output tensor with same shape as input.
+        """
         with autocast(device_type=x.device.type):
             return x + self.dropout(self.attn(
                 self.rms_norm(x),
