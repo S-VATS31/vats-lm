@@ -1,4 +1,5 @@
 import torch.nn.functional as F
+import torch.nn as nn
 from torch import Tensor
 
 def extend_kv_heads(
@@ -34,8 +35,11 @@ def apply_qk_norm(
         eps (float): Epsilon value to avoid division by zero errors.
         use_rms_norm (bool): Whether to use RMS normalization or L2 normalization.
     """
+    def _norm(y: Tensor, eps: float = 1e-10):
+        norm = nn.RMSNorm(y.size(-1), eps=eps)
+        return norm(y)
     if use_rms_norm:
-        return F.rms_norm(tensor, tensor.size(-1), eps=eps)
+        return _norm(tensor, eps=eps)
     return F.normalize(tensor, p=2, dim=-1, eps=eps)
     
 def check_contiguous(tensor: Tensor) -> Tensor:
